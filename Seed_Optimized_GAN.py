@@ -155,7 +155,7 @@ def deconv(in_channels, out_channels, kernel_size, stride=2, padding=1, batch_no
 
     if batch_norm:
         # append batchnorm layer
-        layers.append(nn.BatchNorm2d(out_channels))
+        layers.append(nn.BatchNorm1d(out_channels))
      
     # using Sequential container
     return nn.Sequential(*layers)
@@ -196,7 +196,7 @@ class Generator(nn.Module):
         
         x = self.fc(x)
         
-        x = x.view(-1,self.conv_dim*8,2,2)
+        x = x.view(-1,self.conv_dim*8,2)
         
         x = F.relu(self.dcv1(x))
         x= F.relu(self.dcv2(x))
