@@ -23,18 +23,22 @@ for name in seed_names:
 
 # Define hyperparameters
 batch_size = 32
-z_size = 100
+z_size = 128
 input_size=z_size
-hidden_size=128
+hidden_size=448
+
+n_epochs = 100
 
 d_conv_dim = 32
 g_conv_dim = 32
 maxsize+=g_conv_dim-maxsize%g_conv_dim
 output_size=maxsize
 print(maxsize)
-lr = 0.0005
+d_lr = 0.0005
+g_lr = 0.0008
 beta1 = 0.3
 beta2 = 0.999
+lstm_layers=3
 
 class SeedDataset(data.Dataset):
     def __init__(self, seed_dir, transform=None):
@@ -48,6 +52,7 @@ class SeedDataset(data.Dataset):
         seed = list(open(seed_path,'rb').read())
         seed=self.padding(seed)
         seed = torch.tensor(seed,dtype=torch.float)
+        seed=seed/255
         seed=seed.reshape(1,-1)
         if self.transform:
             seed = self.transform(seed)
@@ -80,12 +85,6 @@ def get_dataloader(batch_size, data_dir):
 
 #get a dataloader
 train_loader = get_dataloader(batch_size, data_dir)
-# obtain one batch of training seeds
-dataiter = iter(train_loader)
-seeds= dataiter.next() # _ for no labels
-
-# plot the images in the batch, along with the corresponding labels
-fig = plt.figure(figsize=(20, 4))
 
 def scale(x, feature_range=(-1, 1)):
     # assume x is scaled to (0, 1)
@@ -93,9 +92,6 @@ def scale(x, feature_range=(-1, 1)):
     min,max = feature_range
     x = x * (max-min) + min
     return x
-
-# check scaled range
-# should be close to -1 to 1
 
 # helper conv function
 def conv(in_channels, out_channels, kernel_size, stride=2, padding=1, batch_norm=True):
@@ -134,7 +130,7 @@ class Discriminator(nn.Module):
         #2 x 2
         self.cv4 = conv(self.conv_dim*4, self.conv_dim*8, 4, batch_norm=True)
         
-        self.fc1 = nn.Linear(self.conv_dim*8*2*2,1)
+        self.fc1 = nn.Linear(self.conv_dim*maxsize//2,1)
         
 
     def forward(self, x):
@@ -144,23 +140,28 @@ class Discriminator(nn.Module):
         :return: Discriminator logits; the output of the neural network
         """
         x = F.leaky_relu(self.cv1(x),0.2)
+
         x = F.leaky_relu(self.cv2(x),0.2)
+
         x = F.leaky_relu(self.cv3(x),0.2)
+
         x = F.leaky_relu(self.cv4(x),0.2)
-        
-        x = x.view(-1,self.conv_dim*8*2*2)
+
+        x = x.view(-1,self.conv_dim*maxsize//2)
+
         x = self.fc1(x)
+
         return x
 
 class Generator(nn.Module):
     
-    def __init__(self, input_size, hidden_size, output_size):
+    def __init__(self, input_size, hidden_size, num_layers, output_size):
         """
         Initialize the Generator Module
         """
         super(Generator, self).__init__()
         self.hidden_size=hidden_size
-        self.lstm=nn.LSTM(input_size,hidden_size)
+        self.lstm=nn.LSTM(input_size,hidden_size,num_layers)
         self.fc=nn.Linear(hidden_size,output_size)
         self.tanh=nn.Tanh()
 
@@ -172,30 +173,14 @@ class Generator(nn.Module):
         :return: A maximun size Tensor as output
         """
         out,_=self.lstm(x)
-        out=self.fc(out[-1])
+        out=self.fc(out)
         out=self.tanh(out)
         return out
 
-# def weights_init_normal(m):
-#     """
-#     Applies initial weights to certain layers in a model .
-#     The weights are taken from a normal distribution 
-#     with mean = 0, std dev = 0.02.
-#     :param m: A module or layer in a network    
-#     """
-#     classname = m.__class__.__name__
-#     if 'Linear' in classname:
-#         torch.nn.init.normal_(m.weight,0.0,0.02)
-#         m.bias.data.fill_(0.01)
-#     # Apply initial weights to convolutional and linear layers
-#     if 'Conv' in classname or 'BatchNorm1d' in classname:
-#         torch.nn.init.normal_(m.weight,0.0,0.02)
-
-
-def build_network(d_conv_dim, g_conv_dim, z_size):
+def build_network(d_conv_dim, hidden_size, z_size, num_layers):
     # define discriminator and generator
     D = Discriminator(d_conv_dim)
-    G = Generator(input_size=z_size,hidden_size=g_conv_dim,output_size=output_size)
+    G = Generator(input_size=z_size,hidden_size=hidden_size,num_layers=num_layers,output_size=output_size)
 
     # initialize model weights
     # D.apply(weights_init_normal)
@@ -207,7 +192,7 @@ def build_network(d_conv_dim, g_conv_dim, z_size):
     
     return D, G
 
-D, G = build_network(d_conv_dim, g_conv_dim, z_size)
+D, G = build_network(d_conv_dim, hidden_size, z_size, num_layers=lstm_layers)
 
 # Check for a GPU
 train_on_gpu = torch.cuda.is_available()
@@ -243,8 +228,12 @@ def fake_loss(D_out):
 
 
 # Create optimizers for the discriminator D and generator G
-d_optimizer = optim.Adam(D.parameters(), lr, betas=(beta1, beta2))
-g_optimizer = optim.Adam(G.parameters(), lr, betas=(beta1, beta2))
+d_optimizer = optim.Adam(D.parameters(), d_lr, betas=(beta1, beta2))
+g_optimizer = optim.Adam(G.parameters(), g_lr, betas=(beta1, beta2))
+
+#  Dynamically adjusting learning rate -- Fixed step attenuation
+d_scheduler = optim.lr_scheduler.StepLR(d_optimizer,step_size=5,gamma = 0.9)
+g_scheduler = optim.lr_scheduler.StepLR(g_optimizer,step_size=5,gamma = 0.9)
 
 def train(D, G, n_epochs, print_every=50):
     '''Trains adversarial networks for some number of epochs
@@ -263,10 +252,10 @@ def train(D, G, n_epochs, print_every=50):
     samples = []
     losses = []
 
-    # Get some fixed data for sampling. These are images that are held
+    # Get some fixed data for sampling. These are seeds that are held
     # constant throughout training, and allow us to inspect the model's performance
     sample_size=16
-    fixed_z = np.random.uniform(-1, 1, size=(sample_size, z_size, 32))
+    fixed_z = np.random.uniform(-1, 1, size=(sample_size, 1, z_size))
     fixed_z = torch.from_numpy(fixed_z).float()
     # move z to GPU if available
     if train_on_gpu:
@@ -276,35 +265,28 @@ def train(D, G, n_epochs, print_every=50):
     for epoch in range(n_epochs):
 
         # batch training loop
-        for batch_i, real_images in enumerate(train_loader):
-
-            batch_size = real_images.size(0)
-
-            real_images = scale(real_images)
+        for batch_i, real_seeds in enumerate(train_loader):
             
-            # 1. Train the discriminator on real and fake images
+            batch_size = real_seeds.size(0)
+            real_seeds = scale(real_seeds)
+            
+            # 1. Train the discriminator on real and fake seeds
             d_optimizer.zero_grad()
 
-            # real images
-            real_images = real_images.to(device)#[32,1,20480]
-            
+            real_seeds = real_seeds.to(device)
 
-            dreal = D(real_images)
+            dreal = D(real_seeds)
             dreal_loss = real_loss(dreal)
 
-            #fake images
-
-            # Generate fake images
-            z = np.random.uniform(-1, 1, size=(batch_size, z_size, 32))
-            
+            # Generate fake seeds
+            z = np.random.uniform(-1, 1, size=(batch_size, 1, z_size))
             z = torch.from_numpy(z).float()
             # move x to GPU, if available
             z = z.to(device)
-            fake_images = G(z)
-            print(fake_images.shape)
+            fake_seeds = G(z)
 
-            # loss of fake images           
-            dfake = D(fake_images)
+            # loss of fake seeds           
+            dfake = D(fake_seeds)
             dfake_loss = fake_loss(dfake)
             
             #Adding both lossess
@@ -313,35 +295,41 @@ def train(D, G, n_epochs, print_every=50):
             d_loss.backward()
             d_optimizer.step() 
 
-            # 2. Train the generator with an adversarial loss
+            # Train the generator with an adversarial loss
             g_optimizer.zero_grad()
             
-            # Generate fake images
-            z = np.random.uniform(-1, 1, size=(batch_size, z_size))
+            # Generate fake seeds
+            z = np.random.uniform(-1, 1, size=(batch_size, 1, z_size))
             z = torch.from_numpy(z).float()
             z = z.to(device)
-            fake_images = G(z)
+            fake_seeds = G(z)
 
-            # Compute the discriminator losses on fake images 
+            # Compute the discriminator losses on fake seeds 
             # using flipped labels!
-            D_fake = D(fake_images)
+            D_fake = D(fake_seeds)
             g_loss = real_loss(D_fake, True) # use real loss to flip labels
 
             # perform backprop
             g_loss.backward()
             g_optimizer.step() 
+            
 
             # Print some loss stats
             if batch_i % print_every == 0:
                 # append discriminator loss and generator loss
                 losses.append((d_loss.item(), g_loss.item()))
                 # print discriminator and generator loss
-                print('Epoch [{:5d}/{:5d}] | d_loss: {:6.4f} | g_loss: {:6.4f}'.format(
-                        epoch+1, n_epochs, d_loss.item(), g_loss.item()))
+                print('Epoch [{:5d}/{:5d}] | d_loss: {:6.4f} | g_loss: {:6.4f} | g_lr: {:6.4f}'.format(
+                        epoch+1, n_epochs, d_loss.item(), g_loss.item(), g_optimizer.state_dict()['param_groups'][0]['lr']))
 
 
         ## AFTER EACH EPOCH##    
-        # generate and save sample, fake images
+        # generate and save sample, fake seeds
+        print(real_seeds)
+        print(fake_seeds)
+        # Adjust learning rate
+        g_scheduler.step()
+        d_scheduler.step()
         G.eval() # for generating samples
         samples_z = G(fixed_z)
         samples.append(samples_z)
@@ -350,12 +338,8 @@ def train(D, G, n_epochs, print_every=50):
     # Save training generator samples
     with open('train_samples.pkl', 'wb') as f:
         pkl.dump(samples, f)
-    
     # finally return losses
     return losses
-
-# set number of epochs 
-n_epochs = 20
 
 
 # call training function
@@ -367,5 +351,5 @@ plt.plot(losses.T[0], label='Discriminator', alpha=0.5)
 plt.plot(losses.T[1], label='Generator', alpha=0.5)
 plt.title("Training Losses")
 plt.legend()
-
+plt.show()
 torch.save(G,'Generator.pt')
