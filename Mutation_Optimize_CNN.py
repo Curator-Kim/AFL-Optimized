@@ -12,11 +12,6 @@ from torchvision import transforms
 import matplotlib.pyplot as plt
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
-if not torch.cuda.is_available():
-    print('No GPU found. Please use a GPU to train your neural network.')
-else:
-    print('Training on GPU!')
-
 
 data_dir="Samples/Samples"
 bitmap_file='bit_map_geq'
@@ -29,29 +24,67 @@ for name in seed_names:
         max_filesize=tmp_size
 if max_filesize%32:
     max_filesize+=32-max_filesize%32
+print(max_filesize)
 # Define function hyperparameters
 epochs=100
 batch_size=32
-lr=0.0004
+lr=0.000001
 input_dim=max_filesize
 n_layer=2
-hidden_dim=750
+conv_dim=32
 n_class=1
 
-class LSTMnet(nn.Module):
-    def __init__(self, in_dim, hidden_dim, n_layer, n_class):
-        super(LSTMnet, self).__init__()
-        self.n_layer = n_layer
-        self.hidden_dim = hidden_dim
-        self.lstm = nn.LSTM(in_dim, hidden_dim, n_layer, batch_first=True)
-        self.BN = nn.BatchNorm1d(hidden_dim)
-        self.linear = nn.Linear(hidden_dim, n_class)
- 
-    def forward(self, x):                  
-        out, _ = self.lstm(x)                            
-        out= self.BN(out.reshape(out.shape[0],-1))                                   
-        out = F.tanh(self.linear(out))             
-        return out
+def conv(in_channels, out_channels, kernel_size, stride=2, padding=1, batch_norm=True):
+    """Creates a convolutional layer, with optional batch normalization.
+    """
+    layers = []
+    conv_layer = nn.Conv1d(in_channels, out_channels, 
+                           kernel_size, stride, padding, bias=False)
+    
+    # append conv layer
+    layers.append(conv_layer)
+
+    if batch_norm:
+        # append batchnorm layer
+        layers.append(nn.BatchNorm1d(out_channels))
+     
+    # using Sequential container
+    return nn.Sequential(*layers)
+
+class CNNnet(nn.Module):
+    def __init__(self, conv_dim): 
+        """
+        :param conv_dim: The depth of the first convolutional layer
+        """
+        super(CNNnet, self).__init__()
+
+        self.conv_dim = conv_dim
+        self.cv1 = conv(1, self.conv_dim, 4, batch_norm=False)
+        self.cv2 = conv(self.conv_dim, self.conv_dim*2, 4, batch_norm=True)
+        self.cv3 = conv(self.conv_dim*2, self.conv_dim*4, 4, batch_norm=True)
+        self.cv4 = conv(self.conv_dim*4, self.conv_dim*8, 4, batch_norm=True)
+        self.fc1 = nn.Linear(self.conv_dim*max_filesize//2,1)
+        
+    def forward(self, x):
+        """
+        Forward propagation of the neural network
+        :param x: The input to the neural network     
+        :return: Discriminator logits; the output of the neural network
+        """
+        # print(x.shape)
+        x = F.leaky_relu(self.cv1(x),0.2)
+        # print(x.shape)
+        x = F.leaky_relu(self.cv2(x),0.2)
+        # print(x.shape)
+        x = F.leaky_relu(self.cv3(x),0.2)
+        # print(x.shape)
+        x = F.leaky_relu(self.cv4(x),0.2)
+        # print(x.shape)
+        x = x.view(-1,self.conv_dim*max_filesize//2)
+        # print(x.shape)
+        x = self.fc1(x)
+
+        return x
  
 ## Data loading...
 
@@ -82,7 +115,7 @@ def get_dataloader(batch_size, data, targets):
     return data_loader
 
 
-def load_samples_bitmaps(sample_dir,bitmap_file,bitmap_dir='mapData'):
+def load_samples_bitmaps(sample_dir,bitmap_file,bitmap_dir='mapData/mapData'):
     Samples,max_filesize=Data_Processing.get_x(sample_dir)
     if os.path.exists(bitmap_file):
         bitmaps=eval(open(bitmap_file,'r').read())
@@ -110,8 +143,8 @@ Train_loader = get_dataloader(batch_size,train_sample_dataset,train_bitmap_datas
 Test_loader = get_dataloader(batch_size,test_sample_dataset,test_bitmap_dataset)
 
 #
-model=LSTMnet(in_dim=input_dim,hidden_dim=hidden_dim,n_layer=n_layer,n_class=n_class)
-model=model.to(device)
+model=CNNnet(conv_dim)
+model.to(device)
 criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=lr)
 scheduler = optim.lr_scheduler.StepLR(optimizer,step_size=1000,gamma = 0.8)
@@ -135,7 +168,7 @@ for epoch in range(epochs):
     train_loss/= batch
     train_losses.append(train_loss)
     scheduler.step()
-    # print('outputs: {}'.format(outputs*std_bitmaps+mean_bitmaps))
+    print('outputs: {}, batch_targets: {}'.format(outputs, batch_targets))
     print('Epoch [{}/{}], Loss: {:.6f}, Lr: {:.4f}'.format(epoch+1, epochs, train_loss, optimizer.param_groups[0]['lr']))
     # test
 

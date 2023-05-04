@@ -54,7 +54,7 @@ def mutate_pos(v1,v2):
     z=np.zeros(len(v1))
     for i in range(len(v1)):
         if v1[i]!=v2[i]:
-            z[i]=1
+            z[i]=3
     return z
 
 
@@ -74,6 +74,8 @@ def get_x(dirname):
         exit(-1)
     seed_names=os.listdir(dirname)
     max_size=get_maxsize(dirname)
+    if max_size%32:
+        max_size+=32-max_size%32
     orig_file=list(open(dirname+'/'+seed_names[0],'rb').read())
     orig_file=np.array(padding(orig_file,max_size))
     for i in range(len(seed_names)):
@@ -96,7 +98,7 @@ def get_Bitmap_data(dirname):
         bitmap_data.append(cur)
     return bitmap_data
 
-def get_Bitmap_data_fast(dirname):
+def get_Bitmap_data_fast(dirname,saved_file):
     bitmap_data=[]
     seed_names=os.listdir(dirname)
     orig_bitmap=open(dirname+'/'+seed_names[0],'rb').read()
@@ -107,6 +109,8 @@ def get_Bitmap_data_fast(dirname):
             tmp = (cur_bitmap[j]^orig_bitmap[j])&cur_bitmap[j]
             cur += bin(tmp).count('1')
         bitmap_data.append(cur)
+    open(saved_file,'w').write(str(bitmap_data))
+    print('--------Finish getting bitmap data---------')
     return bitmap_data
 """ 
 a<b:
@@ -120,10 +124,9 @@ def test():
     # print(get_cov('Samples'))
     # print(get_x('Samples'))
     time1=time.time()
-    bit_map_geq=get_Bitmap_data_fast(mapdata_dir)
+    bit_map_geq=get_Bitmap_data_fast(mapdata_dir,'bit_map_geq')
     time2=time.time()
     print(time2-time1)
-    open('bit_map_geq','w').write(str(bit_map_geq))
     # print(get_Bitmap_data(mapdata_dir))
     # time3=time.time()
     # print(time3-time2)

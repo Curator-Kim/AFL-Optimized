@@ -24,6 +24,7 @@ class Generator(nn.Module):
         super(Generator, self).__init__()
         self.hidden_size=hidden_size
         self.lstm=nn.LSTM(input_size,hidden_size,num_layers)
+        self.batch_norm = nn.BatchNorm1d(hidden_size)
         self.fc=nn.Linear(hidden_size,output_size)
         self.tanh=nn.Tanh()
 
@@ -35,14 +36,15 @@ class Generator(nn.Module):
         :return: A maximun size Tensor as output
         """
         out,_=self.lstm(x)
-        out=self.fc(out)
+        out=self.batch_norm(out.squeeze())
+        out=self.fc(out.reshape(out.shape[0],1,-1))
         out=self.tanh(out)
         return out
 
 
 d_conv_dim = 32
 g_conv_dim = 32
-z_size = 128
+z_size = 256
 
 
 G=torch.load('Generator.pt')
@@ -59,3 +61,4 @@ G_Seed=((G_Seed+1)*255/2).astype(np.uint8)
 np.save('G_Seed',G_Seed)
 print(G_Seed.shape)
 print(G_Seed)
+open('elf','wb').write(G_Seed[2][0])
