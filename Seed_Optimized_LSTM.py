@@ -10,6 +10,8 @@ from torchvision import transforms
 import torch
 import torch.optim as optim
 import torch.utils.data as data
+import Data_Processing
+
 # Check for a GPU
 device = "cuda:0" if torch. cuda.is_available() else "cpu"
 
@@ -31,15 +33,12 @@ if maxsize%32:
 
 # Define hyperparameters
 batch_size = 32
-z_size = 256
+z_size = 160
 input_size=z_size
-hidden_size=544
+hidden_size=512
 
 n_epochs = 1500
 
-d_conv_dim = 32
-g_conv_dim = 32
-maxsize+=g_conv_dim-maxsize%g_conv_dim
 output_size=maxsize
 print(maxsize)
 d_lr = 0.0005
@@ -73,7 +72,7 @@ class SeedDataset(data.Dataset):
             cur_file=list(open(seed_dir+'/'+seed_names[i],'rb').read())
             cur_file=self.padding(cur_file)
             cur_file=torch.tensor(cur_file,dtype=torch.float)
-            cur_file/=256
+            cur_file/=255
             cur_file=cur_file.reshape(1,-1)
             if self.transform:
                 cur_file=self.transform(cur_file)
@@ -107,44 +106,20 @@ def scale(x, feature_range=(-1, 1)):
     x = x * (max-min) + min
     return x
 
-# helper conv function
-def conv(in_channels, out_channels, kernel_size, stride=2, padding=1, batch_norm=True):
-    """Creates a convolutional layer, with optional batch normalization.
-    """
-    layers = []
-    conv_layer = nn.Conv1d(in_channels, out_channels, 
-                           kernel_size, stride, padding, bias=False)
-    
-    # append conv layer
-    layers.append(conv_layer)
-
-    if batch_norm:
-        # append batchnorm layer
-        layers.append(nn.BatchNorm1d(out_channels))
-     
-    # using Sequential container
-    return nn.Sequential(*layers)
-
 class Discriminator(nn.Module):
 
-    def __init__(self, conv_dim): #conv_dim=32
+    def __init__(self, input_size): #conv_dim=32
         """
         Initialize the Discriminator Module
         :param conv_dim: The depth of the first convolutional layer
         """
         super(Discriminator, self).__init__()
-
-        self.conv_dim = conv_dim
-        #32 x 32
-        self.cv1 = conv(1, self.conv_dim, 4, batch_norm=False)
-        #16 x 16
-        self.cv2 = conv(self.conv_dim, self.conv_dim*2, 4, batch_norm=True)
-        #4 x 4
-        self.cv3 = conv(self.conv_dim*2, self.conv_dim*4, 4, batch_norm=True)
-        #2 x 2
-        self.cv4 = conv(self.conv_dim*4, self.conv_dim*8, 4, batch_norm=True)
         
-        self.fc1 = nn.Linear(self.conv_dim*maxsize//2,1)
+        self.fc1 = nn.Linear(input_size,256)
+        self.relu_1=nn.LeakyReLU(0.2)
+        self.fc2 = nn.Linear(256,256)
+        self.relu_2=nn.LeakyReLU(0.2)
+        self.fc3 = nn.Linear(256,1)
         
 
     def forward(self, x):
@@ -153,18 +128,11 @@ class Discriminator(nn.Module):
         :param x: The input to the neural network     
         :return: Discriminator logits; the output of the neural network
         """
-        x = F.leaky_relu(self.cv1(x),0.2)
-
-        x = F.leaky_relu(self.cv2(x),0.2)
-
-        x = F.leaky_relu(self.cv3(x),0.2)
-
-        x = F.leaky_relu(self.cv4(x),0.2)
-
-        x = x.view(-1,self.conv_dim*maxsize//2)
-
         x = self.fc1(x)
-
+        x = self.relu_1(x)
+        x = self.fc2(x)
+        x = self.relu_2(x)
+        x = self.fc3(x)
         return x
 
 class Generator(nn.Module):
@@ -176,7 +144,6 @@ class Generator(nn.Module):
         super(Generator, self).__init__()
         self.hidden_size=hidden_size
         self.lstm=nn.LSTM(input_size,hidden_size,num_layers)
-        self.batch_norm = nn.BatchNorm1d(hidden_size)
         self.fc=nn.Linear(hidden_size,output_size)
         self.tanh=nn.Tanh()
 
@@ -188,10 +155,10 @@ class Generator(nn.Module):
         :return: A maximun size Tensor as output
         """
         out,_=self.lstm(x)
-        out=self.batch_norm(out.squeeze())
         out=self.fc(out.reshape(out.shape[0],1,-1))
         out=self.tanh(out)
         return out
+    
 def weights_init_normal(m):
     """
     Applies initial weights to certain layers in a model .
@@ -204,14 +171,12 @@ def weights_init_normal(m):
         torch.nn.init.normal_(m.weight,0.0,0.02)
         m.bias.data.fill_(0.01)
     # TODO: Apply initial weights to convolutional and linear layers
-    if 'Conv' in classname or 'BatchNorm1d' in classname:
-        torch.nn.init.normal_(m.weight,0.0,0.02)
-    if 'lstm' in classname:
+    if 'Conv1d' in classname or 'BatchNorm1d' in classname:
         torch.nn.init.normal_(m.weight,0.0,0.02)
 
-def build_network(d_conv_dim, hidden_size, z_size, num_layers, pretrain=False, pretrain_G='Generator_pre.pt'):
+def build_network(hidden_size, z_size, num_layers, pretrain=False, pretrain_G='Generator_pre.pt'):
     # define discriminator and generator
-    D = Discriminator(d_conv_dim)
+    D = Discriminator(maxsize)
     D.apply(weights_init_normal)
     if pretrain:
         if os.path.exists(pretrain_G):
@@ -228,7 +193,7 @@ def build_network(d_conv_dim, hidden_size, z_size, num_layers, pretrain=False, p
     return D, G
 
 pretrain=False
-D, G = build_network(d_conv_dim, hidden_size, z_size, num_layers=lstm_layers, pretrain=pretrain)
+D, G = build_network(hidden_size, z_size, num_layers=lstm_layers, pretrain=pretrain)
 
 
 def real_loss(D_out,smooth=False):
@@ -237,7 +202,7 @@ def real_loss(D_out,smooth=False):
        return: real loss'''
     batch_size = D_out.size(0)
     if smooth:
-        labels = torch.ones(batch_size)*0.95
+        labels = torch.ones(batch_size)
     else:
         labels = torch.ones(batch_size)
     labels = labels.to(device)
@@ -250,7 +215,7 @@ def fake_loss(D_out):
        param, D_out: discriminator logits
        return: fake loss'''
     batch_size = D_out.size(0)
-    labels = torch.zeros(batch_size)+0.07
+    labels = torch.zeros(batch_size)
     labels = labels.to(device)
     criterion = nn.BCEWithLogitsLoss()
     loss = criterion(D_out.squeeze(), labels)
@@ -265,6 +230,7 @@ g_optimizer = optim.Adam(G.parameters(), g_lr, betas=(beta1, beta2))
 d_scheduler = optim.lr_scheduler.StepLR(d_optimizer,step_size=200,gamma = 0.93)
 g_scheduler = optim.lr_scheduler.StepLR(g_optimizer,step_size=200,gamma = 0.93)
 
+
 def train(D, G, n_epochs, print_every=50):
     '''Trains adversarial networks for some number of epochs
        param, D: the discriminator network
@@ -275,7 +241,8 @@ def train(D, G, n_epochs, print_every=50):
     
     D=D.to(device)
     G=G.to(device)
-
+    first_epoch=0
+    first_epoch=Data_Processing.load_checkpoint('drive/MyDrive/Seed_Opt_Module',first_epoch,[G,D],[g_optimizer,d_optimizer],True)
     # keep track of loss and generated, "fake" samples
     samples = []
     losses = []
@@ -289,7 +256,7 @@ def train(D, G, n_epochs, print_every=50):
     fixed_z = fixed_z.to(device)
 
     # epoch training loop
-    for epoch in range(n_epochs):
+    for epoch in range(first_epoch,n_epochs):
 
         # batch training loop
         for batch_i, real_seeds in enumerate(train_loader):
@@ -305,7 +272,7 @@ def train(D, G, n_epochs, print_every=50):
             real_seeds = real_seeds.to(device)
 
             dreal = D(real_seeds)
-            dreal_loss = real_loss(dreal, True)
+            dreal_loss = real_loss(dreal)
 
             # Generate fake seeds
             z = np.random.uniform(-1, 1, size=(real_seeds.shape[0], 1, z_size))
@@ -339,7 +306,7 @@ def train(D, G, n_epochs, print_every=50):
             # Compute the discriminator losses on fake seeds 
             # using flipped labels!
             D_fake = D(fake_seeds)
-            g_loss = real_loss(D_fake, False) # use real loss to flip labels
+            g_loss = real_loss(D_fake, True) # use real loss to flip labels
 
             # perform backprop
             g_loss.backward()
@@ -351,8 +318,10 @@ def train(D, G, n_epochs, print_every=50):
                 # append discriminator loss and generator loss
                 losses.append((d_loss.item(), g_loss.item()))
                 # print discriminator and generator loss
-                print('Epoch [{:5d}/{:5d}] | d_loss: {:6.4f} | g_loss: {:6.4f} | g_lr: {:6.6f} | d_lr: {:6.6f}'.format(
-                        epoch+1, n_epochs, d_loss.item(), g_loss.item(), g_optimizer.state_dict()['param_groups'][0]['lr'], d_optimizer.state_dict()['param_groups'][0]['lr']))
+                print('Epoch [{:5d}/{:5d}] | d_loss: {:6.4f} | dfake_loss: {:6.4f} | dreal_loss: {:6.4f} | g_loss: {:6.4f} | g_lr: {:6.6f} | d_lr: {:6.6f}'.format(
+                        epoch+1, n_epochs, d_loss.item(), dfake_loss.item(), dreal_loss.item(), g_loss.item(), 
+                        g_optimizer.state_dict()['param_groups'][0]['lr'], d_optimizer.state_dict()['param_groups'][0]['lr']))
+                
 
 
         ## AFTER EACH EPOCH##    
@@ -362,9 +331,13 @@ def train(D, G, n_epochs, print_every=50):
         g_scheduler.step()
         d_scheduler.step()
         G.eval() # for generating samples
-        samples_z = G(fixed_z)
+        samples_z = G(fixed_z).detach().cpu().numpy()
+        samples_z=((samples_z+1)*255/2).astype(np.uint8)
+        print(samples_z)
         samples.append(samples_z)
         G.train() # back to training mode
+        if epoch %10==0:
+            Data_Processing.save_checkpoint('drive/MyDrive/Seed_Opt_Module',epoch,[G,D],[g_optimizer,d_optimizer],True)
 
     # Save training generator samples
     with open('train_samples.pkl', 'wb') as f:
@@ -384,3 +357,4 @@ plt.title("Training Losses")
 plt.legend()
 plt.show()
 torch.save(G,'drive/MyDrive/Generator.pt')
+
