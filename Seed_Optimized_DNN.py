@@ -31,7 +31,7 @@ if maxsize%32:
     maxsize+=32-maxsize%32
 print(maxsize)
 # Define hyperparameters
-batch_size = 32
+batch_size = 64
 z_size = 160
 input_size = z_size
 G_hidden_size = 1024
@@ -167,8 +167,8 @@ class Generator(nn.Module):
         Initialize the Generator Module
         """
         super(Generator, self).__init__()
-        self.hidden_size=hidden_size
-        self.num_layers=num_layers
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
         
         self.layers = nn.ModuleList([
             nn.Sequential(
@@ -180,7 +180,7 @@ class Generator(nn.Module):
                 get_activation_fn("relu")
             ),
             nn.Sequential(
-                nn.Linear(hidden_size, 1),
+                nn.Linear(hidden_size, output_size),
                 nn.Tanh()
             )
         ])
@@ -210,7 +210,6 @@ def weights_init_normal(m):
     if 'Linear' in classname:
         torch.nn.init.normal_(m.weight,0.0,0.02)
         m.bias.data.fill_(0.01)
-    # TODO: Apply initial weights to convolutional and linear layers
     if 'Conv1d' in classname or 'BatchNorm1d' in classname:
         torch.nn.init.normal_(m.weight,0.0,0.02)
 
@@ -267,12 +266,12 @@ def fake_loss(D_out,epoch=0):
 
 
 # Create optimizers for the discriminator D and generator G
-d_optimizer = optim.Adam(D.parameters(), d_lr, betas=(beta1, beta2))
-g_optimizer = optim.Adam(G.parameters(), g_lr, betas=(beta1, beta2))
+d_optimizer = optim.AdamW(D.parameters(), d_lr, betas=(beta1, beta2))
+g_optimizer = optim.AdamW(G.parameters(), g_lr, betas=(beta1, beta2))
 
 #  Dynamically adjusting learning rate -- Fixed step attenuation
-d_scheduler = optim.lr_scheduler.StepLR(d_optimizer,step_size=175,gamma = 0.75)
-g_scheduler = optim.lr_scheduler.StepLR(g_optimizer,step_size=175,gamma = 0.75)
+d_scheduler = optim.lr_scheduler.StepLR(d_optimizer,step_size=200,gamma = 0.9)
+g_scheduler = optim.lr_scheduler.StepLR(g_optimizer,step_size=200,gamma = 0.9)
 
 def train(D, G, n_epochs, print_every=50):
     '''Trains adversarial networks for some number of epochs
