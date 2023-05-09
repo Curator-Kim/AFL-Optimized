@@ -164,7 +164,7 @@ def mutate_pos(v1,v2):
     z=np.zeros(len(v1))
     for i in range(len(v1)):
         if v1[i]!=v2[i]:
-            z[i]=3
+            z[i]=1
     return z
 
 
@@ -177,7 +177,7 @@ def get_cov(dirname):
     return y
 
 
-def get_x(dirname):
+def get_x(dirname, havoc=False):
     x=[]
     if os.path.exists(dirname)==False:
         print('File not exists!')
@@ -189,26 +189,28 @@ def get_x(dirname):
     orig_file=list(open(dirname+'/'+seed_names[0],'rb').read())
     orig_file=np.array(padding(orig_file,max_size))
     for i in range(len(seed_names)):
+        if havoc and 'havoc' in seed_names[i]:
+            continue
         cur_file=list(open(dirname+'/'+seed_names[i],'rb').read())
         padding(cur_file,max_size)
         x.append(mutate_pos(orig_file,np.array(cur_file)))
     return x,max_size
 
-def get_Bitmap_data(dirname):
-    bitmap_data=[]
-    seed_names=os.listdir(dirname)
-    orig_bitmap=open(dirname+'/'+seed_names[0],'rb').read()
-    for i in range(50):
-        cur_bitmap=open(dirname+'/'+seed_names[i],'rb').read()
-        cur=0
-        for i in range(0x10000):
-            for j in range(8):
-                if (cur_bitmap[i]>>j)&1 == 1 and (orig_bitmap[i]>>j)&1 == 0:
-                    cur+=1
-        bitmap_data.append(cur)
-    return bitmap_data
+# def get_Bitmap_data(dirname):
+#     bitmap_data=[]
+#     seed_names=os.listdir(dirname)
+#     orig_bitmap=open(dirname+'/'+seed_names[0],'rb').read()
+#     for i in range(50):
+#         cur_bitmap=open(dirname+'/'+seed_names[i],'rb').read()
+#         cur=0
+#         for i in range(0x10000):
+#             for j in range(8):
+#                 if (cur_bitmap[i]>>j)&1 == 1 and (orig_bitmap[i]>>j)&1 == 0:
+#                     cur+=1
+#         bitmap_data.append(cur)
+#     return bitmap_data
 
-def get_Bitmap_data_fast(dirname,saved_file):
+def get_Bitmap_data_fast(dirname, saved_file, havoc): #仅快一点点
     """ 
     a<b:
     (a^b)&a
@@ -217,6 +219,8 @@ def get_Bitmap_data_fast(dirname,saved_file):
     seed_names=os.listdir(dirname)
     orig_bitmap=open(dirname+'/'+seed_names[0],'rb').read()
     for i in range(len(seed_names)):
+        if havoc and 'havoc' in seed_names[i]:
+            continue
         cur_bitmap=open(dirname+'/'+seed_names[i],'rb').read()
         cur=0
         for j in range(0x10000):
@@ -257,7 +261,7 @@ def bit_num(dirname):
         bitnum_data.append(cur)
     return bitnum_data
 
-        
+
 
 def test():
     # v1=vectorize_from_file('small_exec.elf')

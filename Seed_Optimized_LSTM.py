@@ -106,33 +106,54 @@ def scale(x, feature_range=(-1, 1)):
     x = x * (max-min) + min
     return x
 
+def get_activation_fn(fn):
+    activation_fn_list = {
+        "relu": nn.ReLU(),
+        "gelu": nn.GELU(),
+        "leakyrelu": nn.LeakyReLU(),
+        "prelu": nn.PReLU(),
+        "rrelu": nn.RReLU(),
+        "elu": nn.ELU(),
+        "softplus": nn.Softplus()
+    }
+    return activation_fn_list[fn]
 class Discriminator(nn.Module):
 
-    def __init__(self, input_size): #conv_dim=32
+    def __init__(self, input_size, hidden_size, num_layers): #num_layers not used yet
         """
         Initialize the Discriminator Module
-        :param conv_dim: The depth of the first convolutional layer
         """
         super(Discriminator, self).__init__()
         
-        self.fc1 = nn.Linear(input_size,256)
-        self.relu_1=nn.LeakyReLU(0.2)
-        self.fc2 = nn.Linear(256,256)
-        self.relu_2=nn.LeakyReLU(0.2)
-        self.fc3 = nn.Linear(256,1)
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
         
-
+        self.layers = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(input_size, hidden_size),
+                get_activation_fn("leakyrelu")
+            ),
+            nn.Sequential(
+                nn.Linear(hidden_size, hidden_size),
+                get_activation_fn("leakyrelu")
+            ),
+            nn.Sequential(
+                nn.Linear(hidden_size, 1),
+                # nn.Sigmoid()
+            )
+        ])
+        
     def forward(self, x):
         """
         Forward propagation of the neural network
         :param x: The input to the neural network     
         :return: Discriminator logits; the output of the neural network
         """
-        x = self.fc1(x)
-        x = self.relu_1(x)
-        x = self.fc2(x)
-        x = self.relu_2(x)
-        x = self.fc3(x)
+        for layer in self.layers:
+            res = x
+            x = layer(x)
+            if res.shape[-1] == x.shape[-1]:
+                x = x + res
         return x
 
 class Generator(nn.Module):

@@ -44,12 +44,10 @@ class LSTMnet(nn.Module):
         self.n_layer = n_layer
         self.hidden_dim = hidden_dim
         self.lstm = nn.LSTM(in_dim, hidden_dim, n_layer, batch_first=True)
-        self.BN = nn.BatchNorm1d(hidden_dim)
         self.linear = nn.Linear(hidden_dim, n_class)
  
     def forward(self, x):                  
-        out, _ = self.lstm(x)                            
-        out= self.BN(out.reshape(out.shape[0],-1))                                   
+        out, _ = self.lstm(x)                                                            
         out = F.tanh(self.linear(out))             
         return out
  
@@ -82,27 +80,31 @@ def get_dataloader(batch_size, data, targets):
     return data_loader
 
 
-def load_samples_bitmaps(sample_dir,bitmap_file,bitmap_dir='mapData'):
-    Samples,max_filesize=Data_Processing.get_x(sample_dir)
+def load_samples_bitmaps(sample_dir,bitmap_file,bitmap_dir='map_readelf'):
+    Samples,max_filesize=Data_Processing.get_x(sample_dir,True)
     if os.path.exists(bitmap_file):
         bitmaps=eval(open(bitmap_file,'r').read())
     else:
         print('---------Getting bitmap data now... Wait for a moment...---------')
-        bitmaps=Data_Processing.get_Bitmap_data_fast(bitmap_dir,bitmap_file)
+        bitmaps=Data_Processing.get_Bitmap_data_fast(bitmap_dir,bitmap_file,True)
     return Samples,np.array(bitmaps)
 
 samples,bitmaps=load_samples_bitmaps(data_dir,bitmap_file)
+print(bitmaps,len(bitmaps))
 mean_bitmaps=bitmaps.sum()/len(bitmaps)
 std_bitmaps=bitmaps.std()
+# print(mean_bitmaps,std_bitmaps)
 
 bitmaps=torch.tensor(bitmaps,dtype=torch.float).reshape(len(bitmaps),1,-1)
 bitmap_normalizer = transforms.Normalize(mean=mean_bitmaps, std=std_bitmaps)
 bitmaps=bitmap_normalizer(bitmaps)
 
-# divide test and train
+# divide test and train set
 train_size, test_size = int(len(samples) * 0.9), len(samples) - int(len(samples) * 0.9)  
 train_sample_dataset, test_sample_dataset = random_split(samples, [train_size, test_size])
-train_bitmap_dataset, test_bitmap_dataset = random_split(bitmaps, [train_size, test_size])  
+train_bitmap_dataset, test_bitmap_dataset = random_split(bitmaps, [train_size, test_size])
+# train_sample_dataset = test_sample_dataset = samples
+# train_bitmap_dataset = test_bitmap_dataset = bitmaps
 print(train_size,test_size)
 
 # Get dataloader
@@ -113,8 +115,8 @@ Test_loader = get_dataloader(batch_size,test_sample_dataset,test_bitmap_dataset)
 model=LSTMnet(in_dim=input_dim,hidden_dim=hidden_dim,n_layer=n_layer,n_class=n_class)
 model=model.to(device)
 criterion = nn.MSELoss()
-optimizer = optim.Adam(model.parameters(), lr=lr)
-scheduler = optim.lr_scheduler.StepLR(optimizer,step_size=1000,gamma = 0.8)
+optimizer = optim.AdamW(model.parameters(), lr=lr)
+scheduler = optim.lr_scheduler.StepLR(optimizer,step_size=200,gamma = 0.8)
 
 
 train_losses=[]
