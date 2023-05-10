@@ -30,25 +30,29 @@ for name in seed_names:
 if max_filesize%32:
     max_filesize+=32-max_filesize%32
 # Define function hyperparameters
-epochs=100
+epochs=1000
 batch_size=32
 lr=0.0004
 input_dim=max_filesize
 n_layer=2
-hidden_dim=750
+hidden_dim=512
 n_class=1
+beta1=0.5
+beta2=0.999
 
 class LSTMnet(nn.Module):
     def __init__(self, in_dim, hidden_dim, n_layer, n_class):
         super(LSTMnet, self).__init__()
         self.n_layer = n_layer
         self.hidden_dim = hidden_dim
-        self.lstm = nn.LSTM(in_dim, hidden_dim, n_layer, batch_first=True)
+        self.lstm = nn.LSTM(in_dim, hidden_dim//2, n_layer, batch_first=True, bidirectional=True)
         self.linear = nn.Linear(hidden_dim, n_class)
  
     def forward(self, x):                  
-        out, _ = self.lstm(x)                                                            
-        out = F.tanh(self.linear(out))             
+        h0 = torch.zeros(self.n_layer*2, x.size(0), self.hidden_dim//2).to(device) # 2 for bidirection 
+        c0 = torch.zeros(self.n_layer*2, x.size(0), self.hidden_dim//2).to(device)
+        out, _ = self.lstm(x, (h0,c0))                                                            
+        out = self.linear(out[:, -1, :])            
         return out
  
 ## Data loading...
@@ -64,6 +68,7 @@ class MyDataset(data.Dataset):
     def __len__(self):
         return len(self.data)
     
+
 def get_dataloader(batch_size, data, targets):
     """
     Batch the neural network data using DataLoader
@@ -80,16 +85,20 @@ def get_dataloader(batch_size, data, targets):
     return data_loader
 
 
-def load_samples_bitmaps(sample_dir,bitmap_file,bitmap_dir='map_readelf'):
-    Samples,max_filesize=Data_Processing.get_x(sample_dir,True)
+def load_samples_bitmaps(sample_dir,bitmap_file,bitmap_dir='map_readelf',XOR=False,HAVOC=False):
+    Samples,max_filesize=Data_Processing.get_x(sample_dir, XOR, HAVOC)
     if os.path.exists(bitmap_file):
         bitmaps=eval(open(bitmap_file,'r').read())
+        if len(bitmaps)!=len(Samples):
+            print("Data length error! Please check your bitmapfile")
+            exit(-1)
     else:
         print('---------Getting bitmap data now... Wait for a moment...---------')
-        bitmaps=Data_Processing.get_Bitmap_data_fast(bitmap_dir,bitmap_file,True)
+        bitmaps=Data_Processing.get_Bitmap_data_fast(bitmap_dir,bitmap_file,HAVOC)
     return Samples,np.array(bitmaps)
 
 samples,bitmaps=load_samples_bitmaps(data_dir,bitmap_file)
+print(samples[0])
 print(bitmaps,len(bitmaps))
 mean_bitmaps=bitmaps.sum()/len(bitmaps)
 std_bitmaps=bitmaps.std()
@@ -115,7 +124,7 @@ Test_loader = get_dataloader(batch_size,test_sample_dataset,test_bitmap_dataset)
 model=LSTMnet(in_dim=input_dim,hidden_dim=hidden_dim,n_layer=n_layer,n_class=n_class)
 model=model.to(device)
 criterion = nn.MSELoss()
-optimizer = optim.AdamW(model.parameters(), lr=lr)
+optimizer = optim.AdamW(model.parameters(), lr=lr, betas=(beta1, beta2))
 scheduler = optim.lr_scheduler.StepLR(optimizer,step_size=200,gamma = 0.8)
 
 

@@ -177,7 +177,11 @@ def get_cov(dirname):
     return y
 
 
-def get_x(dirname, havoc=False):
+def get_x(dirname, XOR=True, havoc=True):
+    """
+    XOR=True: return [0 1 0 1 0 ....], XOR=False: return binary file: [7f, 45, 4c ...] 
+    havoc=True: exclude the files used HAVOC operator
+    """
     x=[]
     if os.path.exists(dirname)==False:
         print('File not exists!')
@@ -189,11 +193,14 @@ def get_x(dirname, havoc=False):
     orig_file=list(open(dirname+'/'+seed_names[0],'rb').read())
     orig_file=np.array(padding(orig_file,max_size))
     for i in range(len(seed_names)):
-        if havoc and 'havoc' in seed_names[i]:
+        if not havoc and 'havoc' in seed_names[i]:
             continue
         cur_file=list(open(dirname+'/'+seed_names[i],'rb').read())
         padding(cur_file,max_size)
-        x.append(mutate_pos(orig_file,np.array(cur_file)))
+        if XOR:
+            x.append(mutate_pos(orig_file,np.array(cur_file)))
+        else:
+            x.append(np.array(cur_file))
     return x,max_size
 
 # def get_Bitmap_data(dirname):
@@ -210,7 +217,7 @@ def get_x(dirname, havoc=False):
 #         bitmap_data.append(cur)
 #     return bitmap_data
 
-def get_Bitmap_data_fast(dirname, saved_file, havoc): #仅快一点点
+def get_Bitmap_data_fast(dirname, saved_file, havoc=True): #仅快一点点
     """ 
     a<b:
     (a^b)&a
@@ -219,7 +226,7 @@ def get_Bitmap_data_fast(dirname, saved_file, havoc): #仅快一点点
     seed_names=os.listdir(dirname)
     orig_bitmap=open(dirname+'/'+seed_names[0],'rb').read()
     for i in range(len(seed_names)):
-        if havoc and 'havoc' in seed_names[i]:
+        if not havoc and 'havoc' in seed_names[i]:
             continue
         cur_bitmap=open(dirname+'/'+seed_names[i],'rb').read()
         cur=0
@@ -278,10 +285,10 @@ def test():
     # time3=time.time()
     # print(time3-time2)
     # print(func2('Samples/Samples'))
-    # print(func1("Samples/Samples"))
-    bitmapdata=bit_num('mapData/mapData')
-    print(bitmapdata)
-    open('bitmapdata','w').write(str(bitmapdata))
+    print(func1("Samples/Samples"))
+    # bitmapdata=bit_num('mapData/mapData')
+    # print(bitmapdata)
+    # open('bitmapdata','w').write(str(bitmapdata))
     # Sample_filter('Samples/Samples','Filtered_Samples')
     pass
 
