@@ -38,16 +38,14 @@ G_hidden_size = 1024
 D_hidden_size = maxsize
 G_layers = 3
 D_layers = 3
-n_epochs = 15000
+n_epochs = 10000
 # epoch_soft_label=n_epochs
 clip_value=0.01
 n_critic=5
 output_size = maxsize
 
-d_lr = 0.0001
-g_lr = 0.0001
-beta1 = 0.5
-beta2 = 0.999
+d_lr = 0.00002
+g_lr = 0.00002
 
 
 # if epoch_soft_label >= n_epochs:
@@ -81,7 +79,7 @@ class SeedDataset(data.Dataset):
             cur_file=self.padding(cur_file)
             cur_file=torch.tensor(cur_file,dtype=torch.float)
             cur_file=cur_file/255
-            cur_file=cur_file.reshape(1,-1)
+            # cur_file=cur_file.reshape(1,-1)
             if self.transform:
                 cur_file=self.transform(cur_file)
             seeds.append(cur_file)
@@ -140,11 +138,11 @@ class Discriminator(nn.Module):
         self.layers = nn.ModuleList([
             nn.Sequential(
                 nn.Linear(input_size, hidden_size),
-                get_activation_fn("leakyrelu")
+                nn.LeakyReLU(True)
             ),
             nn.Sequential(
                 nn.Linear(hidden_size, hidden_size),
-                get_activation_fn("leakyrelu")
+                nn.LeakyReLU(True)
             ),
             nn.Sequential(
                 nn.Linear(hidden_size, 1),
@@ -158,10 +156,10 @@ class Discriminator(nn.Module):
         :return: Discriminator logits; the output of the neural network
         """
         for layer in self.layers:
-            res = x
+            # res = x
             x = layer(x)
-            if res.shape[-1] == x.shape[-1]:
-                x = x + res
+            # if res.shape[-1] == x.shape[-1]:
+            #     x = x + res
         return x
 
 class Generator(nn.Module):
@@ -177,11 +175,22 @@ class Generator(nn.Module):
         self.layers = nn.ModuleList([
             nn.Sequential(
                 nn.Linear(input_size, hidden_size),
-                get_activation_fn("relu")
+                nn.ReLU(True)
             ),
             nn.Sequential(
                 nn.Linear(hidden_size, hidden_size),
-                get_activation_fn("relu")
+                nn.BatchNorm1d(hidden_size, 0.8),
+                nn.ReLU(True)
+            ),
+            nn.Sequential(
+                nn.Linear(hidden_size, hidden_size),
+                nn.BatchNorm1d(hidden_size, 0.8),
+                nn.ReLU(True)
+            ),
+            nn.Sequential(
+                nn.Linear(hidden_size, hidden_size),
+                nn.BatchNorm1d(hidden_size, 0.8),
+                nn.ReLU(True)
             ),
             nn.Sequential(
                 nn.Linear(hidden_size, output_size),
@@ -197,10 +206,10 @@ class Generator(nn.Module):
         :return: A maximun size Tensor as output
         """
         for layer in self.layers:
-            res = x
+            # res = x
             x = layer(x)
-            if res.shape[-1] == x.shape[-1]:
-                x = x + res
+            # if res.shape[-1] == x.shape[-1]:
+            #     x = x + res
         return x
     
 def weights_init_normal(m):
@@ -257,14 +266,14 @@ def train(D, G, n_epochs, print_every=50):
     D=D.to(device)
     G=G.to(device)
     first_epoch=0
-    first_epoch=Data_Processing.load_checkpoint('drive/MyDrive/Seed_Opt_Module',first_epoch,[G,D],[g_optimizer,d_optimizer],True)
+    first_epoch=Data_Processing.load_checkpoint('drive/MyDrive/Seed_Opt_WGAN',first_epoch,[G,D],[g_optimizer,d_optimizer],True)
    
     losses = [] # keep track of loss
 
     # Get some fixed data for sampling. These are seeds that are held
     # constant throughout training, and allow us to inspect the model's performance
     sample_size=16
-    fixed_z = np.random.uniform(-1, 1, size=(sample_size, 1, z_size))
+    fixed_z = np.random.uniform(-1, 1, size=(sample_size, z_size))
     fixed_z = torch.from_numpy(fixed_z).float()
     # move z to GPU if available
     fixed_z = fixed_z.to(device)
@@ -276,7 +285,7 @@ def train(D, G, n_epochs, print_every=50):
         for batch_i, real_seeds in enumerate(train_loader):
             
             batch_size = real_seeds.size(0)
-            random_noise = np.random.uniform(0, 0.003, size=(batch_size, 1, maxsize))
+            random_noise = np.random.uniform(0, 0.003, size=(batch_size, maxsize))
             random_noise = torch.from_numpy(random_noise).float()
             real_seeds = real_seeds + random_noise
             # print(real_seeds)
@@ -287,7 +296,7 @@ def train(D, G, n_epochs, print_every=50):
             real_seeds = real_seeds.to(device)
 
             # Generate fake seeds
-            z = np.random.uniform(-1, 1, size=(real_seeds.shape[0], 1, z_size))
+            z = np.random.uniform(-1, 1, size=(real_seeds.shape[0], z_size))
             z = torch.from_numpy(z).float()
             # move x to GPU, if available
             z = z.to(device)
@@ -306,7 +315,7 @@ def train(D, G, n_epochs, print_every=50):
             g_optimizer.zero_grad()
             
             # Generate fake seeds
-            z = np.random.uniform(-1, 1, size=(real_seeds.shape[0], 1, z_size))
+            z = np.random.uniform(-1, 1, size=(real_seeds.shape[0], z_size))
             z = torch.from_numpy(z).float()
             z = z.to(device)
             fake_seeds = G(z)
@@ -343,7 +352,7 @@ def train(D, G, n_epochs, print_every=50):
         print(samples_z)
         G.train() # back to training mode
         if epoch %10==0 and epoch:
-            Data_Processing.save_checkpoint('drive/MyDrive/Seed_Opt_Module',epoch,[G,D],[g_optimizer,d_optimizer],True)
+            Data_Processing.save_checkpoint('drive/MyDrive/Seed_Opt_WGAN',epoch,[G,D],[g_optimizer,d_optimizer],True)
 
     # finally return losses
     return losses
