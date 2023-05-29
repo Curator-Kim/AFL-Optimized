@@ -35,10 +35,17 @@ batch_size=32
 lr=0.0004
 input_dim=max_filesize
 n_layer=2
-hidden_dim=512
+hidden_dim=1024
 n_class=1
 beta1=0.5
 beta2=0.999
+
+def scale(x, feature_range=(-1, 1)):
+    # assume x is scaled to (0, 1)
+    # scale to feature_range and return scaled x
+    min,max = feature_range
+    x = x * (max-min) + min
+    return x
 
 class LSTMnet(nn.Module):
     def __init__(self, in_dim, hidden_dim, n_layer, n_class):
@@ -52,7 +59,7 @@ class LSTMnet(nn.Module):
         h0 = torch.zeros(self.n_layer*2, x.size(0), self.hidden_dim//2).to(device) # 2 for bidirection 
         c0 = torch.zeros(self.n_layer*2, x.size(0), self.hidden_dim//2).to(device)
         out, _ = self.lstm(x, (h0,c0))                                                            
-        out = self.linear(out[:, -1, :])            
+        out = F.tanh(self.linear(out[:, -1, :]))            
         return out
  
 ## Data loading...
@@ -78,11 +85,15 @@ def get_dataloader(batch_size, data, targets):
     """
 
     seed_data = MyDataset(data,targets)
-    
-    data_loader = torch.utils.data.DataLoader(seed_data,
+    train_size, test_size = int(len(samples) * 0.9), len(samples) - int(len(samples) * 0.9)  
+    Train_set, Test_set = random_split(seed_data, [train_size, test_size])
+    Train_loader = torch.utils.data.DataLoader(Train_set,
                                           batch_size,
                                           shuffle=True)
-    return data_loader
+    Test_loader = torch.utils.data.DataLoader(Test_set,
+                                          batch_size,
+                                          shuffle=True)
+    return Train_loader, Test_loader
 
 
 def load_samples_bitmaps(sample_dir,bitmap_file,bitmap_dir='map_readelf',XOR=False,HAVOC=False):
@@ -97,28 +108,23 @@ def load_samples_bitmaps(sample_dir,bitmap_file,bitmap_dir='map_readelf',XOR=Fal
         bitmaps=Data_Processing.get_Bitmap_data_fast(bitmap_dir,bitmap_file,HAVOC)
     return Samples,np.array(bitmaps)
 
-samples,bitmaps=load_samples_bitmaps(data_dir,bitmap_file)
+samples,bitmaps=load_samples_bitmaps(data_dir, bitmap_file, XOR = False, HAVOC= False)
 print(samples[0])
 print(bitmaps,len(bitmaps))
 mean_bitmaps=bitmaps.sum()/len(bitmaps)
 std_bitmaps=bitmaps.std()
+max_bitmaps=bitmaps.max()
 # print(mean_bitmaps,std_bitmaps)
 
 bitmaps=torch.tensor(bitmaps,dtype=torch.float).reshape(len(bitmaps),1,-1)
-bitmap_normalizer = transforms.Normalize(mean=mean_bitmaps, std=std_bitmaps)
-bitmaps=bitmap_normalizer(bitmaps)
+# bitmap_normalizer = transforms.Normalize(mean=mean_bitmaps, std=std_bitmaps)
+# bitmaps=bitmap_normalizer(bitmaps)
+bitmaps/=max_bitmaps
+bitmaps=scale(bitmaps)
 
-# divide test and train set
-train_size, test_size = int(len(samples) * 0.9), len(samples) - int(len(samples) * 0.9)  
-train_sample_dataset, test_sample_dataset = random_split(samples, [train_size, test_size])
-train_bitmap_dataset, test_bitmap_dataset = random_split(bitmaps, [train_size, test_size])
-# train_sample_dataset = test_sample_dataset = samples
-# train_bitmap_dataset = test_bitmap_dataset = bitmaps
-print(train_size,test_size)
 
 # Get dataloader
-Train_loader = get_dataloader(batch_size,train_sample_dataset,train_bitmap_dataset)
-Test_loader = get_dataloader(batch_size,test_sample_dataset,test_bitmap_dataset)
+Train_loader, Test_loader = get_dataloader(batch_size,samples, bitmaps)
 
 #
 model=LSTMnet(in_dim=input_dim,hidden_dim=hidden_dim,n_layer=n_layer,n_class=n_class)
@@ -131,7 +137,9 @@ scheduler = optim.lr_scheduler.StepLR(optimizer,step_size=200,gamma = 0.8)
 train_losses=[]
 test_losses=[]
 # 训练模型
-for epoch in range(epochs):
+first_epoch=0
+first_epoch=Data_Processing.load_checkpoint('drive/MyDrive/Mutate_Opt_Module',first_epoch,model,optimizer,True)
+for epoch in range(first_epoch,epochs):
     model.train()
     train_loss=0
     for batch,(batch_data, batch_targets) in enumerate(Train_loader):
@@ -148,6 +156,9 @@ for epoch in range(epochs):
     scheduler.step()
     # print('outputs: {}'.format(outputs*std_bitmaps+mean_bitmaps))
     print('Epoch [{}/{}], Loss: {:.6f}, Lr: {:.4f}'.format(epoch+1, epochs, train_loss, optimizer.param_groups[0]['lr']))
+    # save breakpoint
+    if epoch %10 == 0 and epoch:
+        Data_Processing.save_checkpoint('drive/MyDrive/Mutate_Opt_Module',epoch,model,optimizer,True)
     # test
 
     model.eval()  

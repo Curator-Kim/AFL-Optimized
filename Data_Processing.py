@@ -200,7 +200,7 @@ def get_x(dirname, XOR=True, havoc=True):
         if XOR:
             x.append(mutate_pos(orig_file,np.array(cur_file)))
         else:
-            x.append(np.array(cur_file))
+            x.append(np.array(cur_file)/255)
     return x,max_size
 
 # def get_Bitmap_data(dirname):
